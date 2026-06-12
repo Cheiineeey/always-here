@@ -118,6 +118,78 @@ Apple Watch 健康数据通过 iOS Shortcuts 定时同步到 VPS 的 SQLite。
 | sleep_rem_min | REM 时长 |
 | active_calories | 活动消耗 |
 
+### 踩坑：睡眠数据是碎片，不是一个数字
+
+Apple Watch 不会给你一条"昨晚睡了 8 小时"的记录。它记录的是几十个 sleep sample——每段几十分钟，标记为 Core / Deep / REM / Awake，时间还可能跨午夜。
+
+如果你直接拿 iOS Shortcuts 里的「获取健康样本 → 睡眠分析」，拿到的是这样一堆东西：
+
+```json
+[
+  {"Start": "Jun 11, 2026 at 11:42 PM", "Duration": 47, "Value": "Core"},
+  {"Start": "Jun 12, 2026 at 12:29 AM", "Duration": 23, "Value": "Deep"},
+  {"Start": "Jun 12, 2026 at 12:52 AM", "Duration": 38, "Value": "REM"},
+  {"Start": "Jun 12, 2026 at 01:30 AM", "Duration": 12, "Value": "Awake"},
+  {"Start": "Jun 12, 2026 at 01:42 AM", "Duration": 55, "Value": "Core"},
+  ...
+]
+```
+
+你需要自己拼成一晚的睡眠：
+
+```python
+from datetime import datetime, timedelta
+
+def parse_sleep_samples(samples, today):
+    # 1. 去重（同 Start + Value + Duration 的只留一条）
+    seen = set()
+    unique = []
+    for s in samples:
+        key = (s["Start"], s["Value"], s["Duration"])
+        if key not in seen:
+            seen.add(key)
+            unique.append(s)
+
+    # 2. 解析时间并排序
+    parsed = []
+    for s in unique:
+        dt = datetime.strptime(s["Start"], "%b %d, %Y at %I:%M %p")
+        parsed.append({"dt": dt, "dur": int(s["Duration"]), "val": s["Value"]})
+    parsed.sort(key=lambda x: x["dt"])
+
+    # 3. 用"前一天中午到当天中午"的窗口筛选
+    #    这样跨午夜的睡眠（11PM - 7AM）会被归到同一晚
+    win_start = datetime(today.year, today.month, today.day) - timedelta(hours=12)
+    win_end   = datetime(today.year, today.month, today.day) + timedelta(hours=12)
+    night = [s for s in parsed if win_start <= s["dt"] < win_end]
+
+    if not night:
+        return None
+
+    # 4. 入睡 = 最早 sample 的开始时间，起床 = 最晚 sample 的结束时间
+    sleep_start = night[0]["dt"]
+    sleep_end   = night[-1]["dt"] + timedelta(minutes=night[-1]["dur"])
+    total_min   = int((sleep_end - sleep_start).total_seconds() / 60)
+
+    # 5. 按阶段累加时长
+    stages = {"Core": 0, "Deep": 0, "REM": 0, "Awake": 0}
+    for s in night:
+        if s["val"] in stages:
+            stages[s["val"]] += s["dur"]
+
+    return {
+        "sleep_start": sleep_start.strftime("%H:%M"),
+        "sleep_end": sleep_end.strftime("%H:%M"),
+        "total_min": total_min,
+        "core_min": stages["Core"],
+        "deep_min": stages["Deep"],
+        "rem_min": stages["REM"],
+        "awake_min": stages["Awake"],
+    }
+```
+
+关键是那个**中午到中午的窗口**——如果用"0 点到 0 点"，11 PM 入睡的 sample 会被分到前一天，7 AM 起床的会被分到第二天，一晚的睡眠被切成两半。
+
 ### AI 怎么用
 
 健康数据不是直接念数字——而是影响 AI 的行为：
