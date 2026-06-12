@@ -209,6 +209,75 @@ def parse_sleep_samples(samples, today):
 
 详见 `murmur_example.js`。
 
+## 5. 跨端感知：让 AI 读到你在别处的对话
+
+如果你的 AI 不只在一个地方跟你聊天（比如你同时用一个 Web 聊天界面和另一个 AI 平台），你会遇到一个问题：AI 在 A 平台上不知道你在 B 平台上说了什么。对话是割裂的。
+
+解决方案：架一个**消息网关**，所有对话都经过它，它维护一份统一的对话时间线。
+
+### 架构
+
+```
+┌──────────────┐
+│  聊天界面 A   │──▶ ┌────────────────────┐
+└──────────────┘    │                    │
+                    │   消息网关 (Node.js) │ ◀── enhanced_messages.json
+┌──────────────┐    │                    │      (统一对话时间线)
+│  AI 平台 B   │──▶ │  /v1/messages      │
+│ (通过 MCP)   │    │  /api/timeline     │
+└──────────────┘    └────────┬───────────┘
+                             │
+                         LLM API
+                    (Anthropic / OpenAI)
+```
+
+### 网关做什么
+
+网关是一个兼容 OpenAI / Anthropic API 格式的代理：
+
+1. **接收消息**：聊天界面发消息到 `/v1/messages`（或 `/v1/chat/completions`）
+2. **存入时间线**：每条消息（用户的和 AI 的）都追加到 `enhanced_messages.json`
+3. **转发给 LLM**：网关把消息转发给真正的 LLM API，拿到回复
+4. **返回回复**：同时把 AI 的回复也存进时间线
+
+### 对外暴露时间线
+
+```javascript
+// 只读接口：返回最近 N 条对话
+app.get("/api/timeline", async (req, reply) => {
+  const limit = Math.min(parseInt(req.query.limit || "15"), 30);
+  const msgs = fs.readJsonSync("./enhanced_messages.json");
+
+  // 过滤掉 system 消息和工具调用，只返回真实对话
+  const real = msgs.filter(m =>
+    m.role !== "system" &&
+    !m.tool_calls &&
+    m.content &&
+    typeof m.content === "string" &&
+    m.content.trim().length > 0
+  );
+
+  reply.send({ messages: real.slice(-limit), total: real.length });
+});
+```
+
+### 另一个平台怎么读
+
+在另一个 AI 平台上，让 AI 在回复前先调用 `/api/timeline?limit=15` 拉取最近对话，注入到 prompt 里作为上下文。这样无论你在哪个平台说话，AI 都能接上之前的话题。
+
+```javascript
+// 在构造 prompt 时注入跨端上下文
+const timeline = await fetch('/gateway/api/timeline?limit=15').then(r => r.json());
+const timelineText = timeline.messages
+  .map(m => `${m.role}: ${m.content}`)
+  .join('\n');
+
+// 注入到最后一条 user 消息里
+const context = `【最近在另一个聊天端的对话（供衔接参考）】\n${timelineText}`;
+```
+
+这样 AI 从一个冷冰冰的"每次都从零开始"变成了"知道你刚才在别处说了什么"。
+
 ## 文件说明
 
 | 文件 | 说明 |
