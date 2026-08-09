@@ -289,14 +289,14 @@ const context = `【最近在另一个聊天端的对话（供衔接参考）】
 
 ## 前置条件
 
-- 已完成 [基础篇：iOS Web Push](https://github.com/Cheiineeey/Matt)（VAPID + Service Worker + 推送能力）
+- 已完成 [基础篇：iOS Web Push](https://github.com/Cheiineeey/ios-web-push)（VAPID + Service Worker + 推送能力）
 - Node.js 18+、Python 3.7+、PM2
 - iOS 16.4+、Apple Watch（健康数据可选）
 - 任意 LLM API（OpenAI 兼容格式）
 
 ## License
 
-MIT
+[MIT](LICENSE)
 
 ---
 
