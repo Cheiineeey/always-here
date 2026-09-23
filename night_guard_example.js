@@ -6,7 +6,16 @@ const app = express();
 
 const events = [];
 
-app.get("/api/events", async (req, res) => {
+// 鉴权：仅允许携带正确 API Key 的请求访问
+function requireApiKey(req, res, next) {
+  const key = req.header("x-api-key");
+  if (!process.env.API_KEY || key !== process.env.API_KEY) {
+    return res.status(401).json({ ok: false, msg: "unauthorized" });
+  }
+  next();
+}
+
+app.get("/api/events", requireApiKey, async (req, res) => {
   const { type, value } = req.query;
   if (!type || !value) return res.json({ ok: false });
 
