@@ -2,7 +2,12 @@
 // 接收 iOS Shortcuts 的 App 使用事件，凌晨触发推送
 
 const express = require("express"); // 或 fastify
+const cookieParser = require("cookie-parser");
+const csrf = require("csurf");
 const app = express();
+
+app.use(cookieParser());
+app.use(csrf({ cookie: true }));
 
 const events = [];
 
